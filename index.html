@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Check-In</title>
+<meta name="theme-color" content="#0E7C7B">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Check-In">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    fontFamily: { sans: ['"Instrument Sans"', 'system-ui', 'sans-serif'] },
+    colors: { ink: '#12212B', paper: '#F4F7F7', brand: '#0E7C7B', ok: '#17713D', warn: '#8A5A00', bad: '#B3261E' }
+  } }
+};
+</script>
+<style type="text/tailwindcss">
+@layer components {
+  .field { @apply mt-1 block w-full h-12 rounded-xl border border-ink/20 bg-white px-4 text-base outline-none focus:border-brand focus:ring-2 focus:ring-brand/30; }
+  .btn { @apply h-12 rounded-xl px-5 font-semibold transition active:scale-[.98] disabled:opacity-60; }
+}
+</style>
+<style>
+  #qr img { width: 100% !important; height: auto !important; display: block; }
+  #qr canvas { display: none !important; }
+  #reader video { width: 100% !important; display: block; }
+  #reader { border: 0 !important; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body class="bg-paper text-ink font-sans antialiased min-h-screen">
+
+<div id="splash" class="grid place-items-center min-h-screen px-6 text-center text-ink/60">Loading…</div>
+
+<main class="mx-auto max-w-md px-4 pb-[calc(2rem+env(safe-area-inset-bottom))]">
+
+  <!-- Log in / Sign up -->
+  <section id="authView" class="hidden pt-12">
+    <h1 class="text-3xl font-bold tracking-tight">Check-In</h1>
+    <p class="mt-1 text-ink/70">Attendance with a QR code.</p>
+    <div class="mt-8 rounded-3xl border border-ink/10 bg-white p-5 shadow-sm">
+      <div class="grid grid-cols-2 gap-1 rounded-xl bg-paper p-1" role="tablist">
+        <button type="button" id="tabLogin" role="tab">Log in</button>
+        <button type="button" id="tabSignup" role="tab">Sign up</button>
+      </div>
+      <form id="authForm" class="mt-5 space-y-4" novalidate>
+        <div id="signupFields" class="hidden space-y-4">
+          <label class="block">
+            <span class="text-sm font-medium">Full name</span>
+            <input id="name" type="text" autocomplete="name" class="field">
+          </label>
+          <fieldset>
+            <legend class="text-sm font-medium">I am an</legend>
+            <div class="mt-1 grid grid-cols-2 gap-2">
+              <label>
+                <input type="radio" name="role" value="attendee" checked class="peer sr-only">
+                <span class="block h-12 cursor-pointer rounded-xl border border-ink/20 bg-white text-center font-semibold leading-[3rem] peer-checked:border-brand peer-checked:bg-brand/10 peer-checked:text-brand peer-focus-visible:ring-2 peer-focus-visible:ring-brand/40">Attendee</span>
+              </label>
+              <label>
+                <input type="radio" name="role" value="admin" class="peer sr-only">
+                <span class="block h-12 cursor-pointer rounded-xl border border-ink/20 bg-white text-center font-semibold leading-[3rem] peer-checked:border-brand peer-checked:bg-brand/10 peer-checked:text-brand peer-focus-visible:ring-2 peer-focus-visible:ring-brand/40">Admin</span>
+              </label>
+            </div>
+          </fieldset>
+        </div>
+        <label class="block">
+          <span class="text-sm font-medium">Email</span>
+          <input id="email" type="email" inputmode="email" autocapitalize="none" autocomplete="username" class="field">
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium">Password</span>
+          <input id="password" type="password" autocomplete="current-password" class="field">
+        </label>
+        <p id="authErr" class="min-h-5 text-sm font-medium text-bad" role="alert"></p>
+        <button id="submitBtn" type="submit" class="btn w-full bg-brand text-white">Log in</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- Signed-in shell -->
+  <section id="appView" class="hidden">
+    <header class="flex items-center justify-between gap-3 py-4">
+      <div class="min-w-0">
+        <p id="who" class="truncate font-semibold"></p>
+        <p id="roleTag" class="text-sm text-ink/60"></p>
+      </div>
+      <button id="logout" class="btn h-11 border border-ink/15 bg-white px-4">Sign out</button>
+    </header>
+
+    <!-- Attendee -->
+    <div id="attendeeView" class="hidden space-y-5">
+      <div class="relative overflow-hidden rounded-3xl border border-ink/10 bg-white shadow-sm">
+        <div class="p-6 pb-5"><div id="qr" class="mx-auto aspect-square w-full max-w-[320px]"></div></div>
+        <div class="relative border-t-2 border-dashed border-ink/15">
+          <span class="absolute -left-3 -top-3 h-6 w-6 rounded-full bg-paper"></span>
+          <span class="absolute -right-3 -top-3 h-6 w-6 rounded-full bg-paper"></span>
+        </div>
+        <div class="p-5 text-center">
+          <p id="passName" class="text-xl font-bold"></p>
+          <p id="status" class="mt-2 inline-block rounded-full px-3 py-1 text-sm font-medium"></p>
+        </div>
+      </div>
+      <div class="rounded-3xl border border-ink/10 bg-white p-5">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold">Your check-ins</h2>
+          <span id="histCount" class="rounded-full bg-paper px-3 py-1 text-sm font-semibold">0</span>
+        </div>
+        <ul id="history" class="mt-2 divide-y divide-ink/10"></ul>
+      </div>
+    </div>
+
+    <!-- Admin -->
+    <div id="adminView" class="hidden space-y-5">
+      <div class="space-y-4 rounded-3xl border border-ink/10 bg-white p-4">
+        <div class="relative min-h-64 overflow-hidden rounded-2xl bg-ink">
+          <div id="reader"></div>
+          <div id="idle" class="absolute inset-0 grid place-items-center p-6 text-center text-white/80">Point the rear camera at an attendee's QR code.</div>
+        </div>
+        <div id="banner" class="hidden" role="status" aria-live="polite"></div>
+        <button id="scanBtn" type="button" class="btn w-full bg-brand text-white">Start scanning</button>
+      </div>
+      <div class="rounded-3xl border border-ink/10 bg-white p-5">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold">Today's check-ins</h2>
+            <p id="todayDate" class="text-sm text-ink/60"></p>
+          </div>
+          <span id="todayCount" class="rounded-full bg-brand/10 px-3 py-1 text-sm font-semibold text-brand">0</span>
+        </div>
+        <ul id="today" class="mt-2 divide-y divide-ink/10"></ul>
+        <button id="csvBtn" type="button" class="btn mt-4 w-full border border-ink/20 bg-white">Download CSV</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-1/2 z-50 hidden max-w-[90vw] -translate-x-1/2 rounded-xl px-4 py-3 text-white shadow-lg" role="status"></div>
+
+<script>
+setTimeout(function () {
+  var s = document.getElementById('splash');
+  if (s && !s.classList.contains('hidden')) s.textContent = 'Could not load the app. Check your connection, then check the Firebase SDK version in the import URLs.';
+}, 8000);
+</script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, deleteUser } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, collection, query, where, onSnapshot, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
+
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyA5QojZ72yvBW4NsRsiAA8KM3RW0eueG1I",
+  authDomain: "project-7d2c8569-e32c-416c-8f6.firebaseapp.com",
+  projectId: "project-7d2c8569-e32c-416c-8f6",
+  storageBucket: "project-7d2c8569-e32c-416c-8f6.firebasestorage.app",
+  messagingSenderId: "2531524266",
+  appId: "1:2531524266:web:18ed067e2b792342681ad3",
+  measurementId: "G-064FKJDPKN"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+/* ---------- helpers ---------- */
+const $ = id => document.getElementById(id);
+const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad = n => String(n).padStart(2, '0');
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const fmtDate = ds => new Date(ds + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+const fmtTime = d => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const tsOf = r => (r.timestamp && r.timestamp.toDate) ? r.timestamp.toDate() : new Date(0);
+const row = (a, b) => `<li class="flex items-center justify-between gap-3 py-3"><span class="truncate font-medium">${h(a)}</span><span class="shrink-0 tabular-nums text-ink/60">${h(b)}</span></li>`;
+const empty = msg => `<li class="py-6 text-center text-ink/60">${h(msg)}</li>`;
+
+const MSG = {
+  'auth/invalid-credential': 'Wrong email or password.',
+  'auth/invalid-email': 'Enter a valid email address.',
+  'auth/email-already-in-use': 'That email already has an account. Log in instead.',
+  'auth/weak-password': 'Use a password with at least 6 characters.',
+  'auth/network-request-failed': 'No connection. Check your internet and try again.',
+  'auth/too-many-requests': 'Too many attempts. Wait a minute and try again.',
+  'auth/operation-not-allowed': 'Email/Password sign-in is off. Turn it on in the Firebase console under Authentication.',
+  'permission-denied': 'Firestore blocked this request. Update your Firestore security rules.'
+};
+const errMsg = e => MSG[e && e.code] || (e && e.message) || 'Something went wrong. Try again.';
+
+let toastTimer;
+function toast(msg, kind = 'ok') {
+  const t = $('toast');
+  t.className = 'fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl px-4 py-3 text-white shadow-lg ' + ({ ok: 'bg-ink', warn: 'bg-warn', bad: 'bg-bad' }[kind] || 'bg-ink');
+  t.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), 4000);
+}
+
+/* ---------- PWA: manifest + icons generated at runtime ---------- */
+function icon(n) {
+  const c = document.createElement('canvas'); c.width = c.height = n;
+  const x = c.getContext('2d'), u = n / 8;
+  x.fillStyle = '#0E7C7B'; x.fillRect(0, 0, n, n);
+  const sq = (a, b) => {
+    x.fillStyle = '#fff'; x.fillRect(a * u, b * u, 2.4 * u, 2.4 * u);
+    x.fillStyle = '#0E7C7B'; x.fillRect((a + .6) * u, (b + .6) * u, 1.2 * u, 1.2 * u);
+    x.fillStyle = '#fff'; x.fillRect((a + .9) * u, (b + .9) * u, .6 * u, .6 * u);
+  };
+  sq(1.4, 1.4); sq(4.2, 1.4); sq(1.4, 4.2);
+  x.fillStyle = '#fff';
+  [[4.4, 4.4], [5.8, 5.8], [4.4, 5.8], [5.8, 4.4]].forEach(p => x.fillRect(p[0] * u, p[1] * u, .8 * u, .8 * u));
+  return c.toDataURL('image/png');
+}
+(function setupPWA() {
+  const base = new URL('./', location.href).href;
+  const manifest = {
+    name: 'Check-In QR Attendance', short_name: 'Check-In', start_url: base, scope: base,
+    display: 'standalone', orientation: 'portrait', background_color: '#F4F7F7', theme_color: '#0E7C7B',
+    icons: [
+      { src: icon(192), sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+      { src: icon(512), sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+    ]
+  };
+  const m = document.createElement('link'); m.rel = 'manifest';
+  m.href = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' }));
+  document.head.appendChild(m);
+  const a = document.createElement('link'); a.rel = 'apple-touch-icon'; a.href = icon(180);
+  document.head.appendChild(a);
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+})();
+
+/* ---------- state ---------- */
+let me = null, routeId = 0, pending = false;
+let unsubs = [], dayUnsub = null, dayTimer = null, listDay = '', todayRows = [];
+let scanner = null, scanning = false, busy = false, last = { t: '', at: 0 };
+
+/* ---------- auth UI ---------- */
+let mode = 'login';
+const tabCls = on => 'h-11 rounded-lg font-semibold transition ' + (on ? 'bg-white text-ink shadow-sm' : 'text-ink/60');
+function submitLabel() { return mode === 'login' ? 'Log in' : 'Create account'; }
+function setMode(m) {
+  mode = m;
+  $('tabLogin').className = tabCls(m === 'login');
+  $('tabSignup').className = tabCls(m === 'signup');
+  $('tabLogin').setAttribute('aria-selected', m === 'login');
+  $('tabSignup').setAttribute('aria-selected', m === 'signup');
+  $('signupFields').classList.toggle('hidden', m === 'login');
+  $('password').autocomplete = m === 'login' ? 'current-password' : 'new-password';
+  $('submitBtn').textContent = submitLabel();
+  $('authErr').textContent = '';
+}
+function setBusy(b) {
+  $('submitBtn').disabled = b;
+  $('submitBtn').textContent = b ? 'Please wait…' : submitLabel();
+}
+$('tabLogin').onclick = () => setMode('login');
+$('tabSignup').onclick = () => setMode('signup');
+setMode('login');
+
+$('authForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const email = $('email').value.trim(), pw = $('password').value, name = $('name').value.trim();
+  const role = document.querySelector('input[name="role"]:checked').value;
+  const err = $('authErr');
+  err.textContent = '';
+  if (!email || !pw) { err.textContent = 'Enter your email and password.'; return; }
+  if (mode === 'signup' && !name) { err.textContent = 'Enter your full name.'; return; }
+  setBusy(true);
+  try {
+    if (mode === 'login') await signInWithEmailAndPassword(auth, email, pw);
+    else await signUp(name, email, pw, role);
+  } catch (ex) {
+    err.textContent = errMsg(ex);
+  } finally {
+    setBusy(false);
+  }
+});
+
+async function signUp(name, email, pw, role) {
+  pending = true;
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, pw);
+    try {
+      await setDoc(doc(db, 'users', cred.user.uid), { name, email, role, createdAt: serverTimestamp() });
+    } catch (ex) {
+      await deleteUser(cred.user).catch(() => {});
+      throw ex;
+    }
+    updateProfile(cred.user, { displayName: name }).catch(() => {});
+    pending = false;
+    await route(cred.user, { name, email, role });
+  } finally {
+    pending = false;
+  }
+}
+
+$('logout').onclick = () => signOut(auth);
+
+/* ---------- routing ---------- */
+function cleanup() {
+  unsubs.forEach(f => f()); unsubs = [];
+  clearInterval(dayTimer);
+  stopScan();
+  $('qr').innerHTML = '';
+  $('banner').classList.add('hidden');
+}
+
+async function route(user, known) {
+  const t = ++routeId;
+  cleanup();
+  if (!user) {
+    me = null;
+    $('appView').classList.add('hidden');
+    $('authView').classList.remove('hidden');
+    $('splash').classList.add('hidden');
+    return;
+  }
+  let p = known;
+  if (!p) {
+    try {
+      const s = await getDoc(doc(db, 'users', user.uid));
+      p = s.exists() ? s.data() : null;
+    } catch (ex) {
+      if (t !== routeId) return;
+      toast(errMsg(ex), 'bad');
+      await signOut(auth);
+      return;
+    }
+  }
+  if (t !== routeId) return;
+  if (!p) {
+    toast('This account has no profile. Sign up again with a different email.', 'bad');
+    await signOut(auth);
+    return;
+  }
+  me = { uid: user.uid, name: p.name, email: p.email, role: p.role };
+  const admin = me.role === 'admin';
+  $('who').textContent = me.name;
+  $('roleTag').textContent = admin ? 'Admin' : 'Attendee';
+  $('authView').classList.add('hidden');
+  $('appView').classList.remove('hidden');
+  $('splash').classList.add('hidden');
+  $('adminView').classList.toggle('hidden', !admin);
+  $('attendeeView').classList.toggle('hidden', admin);
+  $('password').value = '';
+  admin ? initAdmin() : initAttendee();
+}
+onAuthStateChanged(auth, u => { if (!pending) route(u); });
+
+/* ---------- attendee ---------- */
+function initAttendee() {
+  $('qr').innerHTML = '';
+  if (window.QRCode) {
+    new QRCode($('qr'), {
+      text: JSON.stringify({ uid: me.uid, name: me.name }),
+      width: 320, height: 320, colorDark: '#12212B', colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  } else {
+    $('qr').textContent = 'QR library failed to load. Check your connection and reload.';
+  }
+  $('passName').textContent = me.name;
+  const q = query(collection(db, 'attendance'), where('userId', '==', me.uid));
+  unsubs.push(onSnapshot(q, snap => {
+    const rows = snap.docs.map(d => d.data({ serverTimestamps: 'estimate' })).sort((a, b) => tsOf(b) - tsOf(a));
+    $('histCount').textContent = rows.length;
+    const today = rows.find(r => r.dateString === todayStr());
+    $('status').textContent = today ? 'Checked in at ' + fmtTime(tsOf(today)) : 'Not checked in today';
+    $('status').className = 'mt-2 inline-block rounded-full px-3 py-1 text-sm font-medium ' + (today ? 'bg-ok/10 text-ok' : 'bg-ink/5 text-ink/70');
+    $('history').innerHTML = rows.length
+      ? rows.map(r => row(fmtDate(r.dateString), fmtTime(tsOf(r)))).join('')
+      : empty('No check-ins yet. Show your QR code to an admin.');
+  }, ex => toast(errMsg(ex), 'bad')));
+}
+
+/* ---------- admin: today's list ---------- */
+function initAdmin() {
+  unsubs.push(() => { if (dayUnsub) { dayUnsub(); dayUnsub = null; } });
+  watchToday();
+  dayTimer = setInterval(() => { if (todayStr() !== listDay) watchToday(); }, 30000);
+}
+
+function watchToday() {
+  if (dayUnsub) dayUnsub();
+  listDay = todayStr();
+  $('todayDate').textContent = fmtDate(listDay);
+  const q = query(collection(db, 'attendance'), where('dateString', '==', listDay));
+  dayUnsub = onSnapshot(q, snap => {
+    todayRows = snap.docs.map(d => d.data({ serverTimestamps: 'estimate' })).sort((a, b) => tsOf(b) - tsOf(a));
+    $('todayCount').textContent = todayRows.length;
+    $('today').innerHTML = todayRows.length
+      ? todayRows.map(r => row(r.userName, fmtTime(tsOf(r)))).join('')
+      : empty('No check-ins yet. Scanned attendees appear here.');
+  }, ex => toast(errMsg(ex), 'bad'));
+}
+
+/* ---------- admin: scanner ---------- */
+function banner(kind, msg) {
+  const b = $('banner');
+  b.className = 'rounded-xl px-4 py-3 font-medium ' + ({ ok: 'bg-ok/10 text-ok', warn: 'bg-warn/10 text-warn', bad: 'bg-bad/10 text-bad' }[kind]);
+  b.textContent = msg;
+}
+function setScanBtn() {
+  $('scanBtn').textContent = scanning ? 'Stop scanning' : 'Start scanning';
+  $('scanBtn').className = 'btn w-full ' + (scanning ? 'border border-ink/20 bg-white text-ink' : 'bg-brand text-white');
+}
+
+async function startScan() {
+  if (scanning) return;
+  if (!window.isSecureContext) { banner('bad', 'The camera needs HTTPS. Open this page from your hosted https:// address.'); return; }
+  if (!window.Html5Qrcode) { banner('bad', 'The scanner library failed to load. Check your connection and reload.'); return; }
+  $('scanBtn').disabled = true;
+  try {
+    scanner = new Html5Qrcode('reader', { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], verbose: false });
+    await scanner.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: (w, hh) => { const s = Math.floor(Math.min(w, hh) * 0.7); return { width: s, height: s }; } },
+      onScan,
+      () => {}
+    );
+    scanning = true;
+    $('idle').classList.add('hidden');
+    $('banner').classList.add('hidden');
+    setScanBtn();
+  } catch (ex) {
+    scanner = null;
+    const s = String(ex);
+    banner('bad', /NotAllowed|Permission/i.test(s)
+      ? 'Camera access is blocked. Allow the camera for this site in your browser settings, then try again.'
+      : 'Could not open the camera: ' + (ex && ex.message ? ex.message : s));
+  } finally {
+    $('scanBtn').disabled = false;
+  }
+}
+
+async function stopScan() {
+  const s = scanner;
+  scanner = null; scanning = false;
+  $('idle').classList.remove('hidden');
+  setScanBtn();
+  if (!s) return;
+  try { await s.stop(); } catch (_) {}
+  try { s.clear(); } catch (_) {}
+}
+$('scanBtn').onclick = () => (scanning ? stopScan() : startScan());
+
+async function onScan(text) {
+  const now = Date.now();
+  if (busy || (text === last.t && now - last.at < 4000)) return;
+  busy = true; last = { t: text, at: now };
+  try { await handleScan(text); }
+  catch (ex) { banner('bad', errMsg(ex)); }
+  finally { busy = false; last.at = Date.now(); }
+}
+
+async function handleScan(text) {
+  let p;
+  try { p = JSON.parse(text); } catch (_) { p = null; }
+  if (!p || typeof p.uid !== 'string' || !/^[A-Za-z0-9_-]{6,128}$/.test(p.uid)) {
+    banner('bad', 'That is not an attendance QR code.');
+    return;
+  }
+  // Use the name stored in Firestore, not the name printed in the QR.
+  const snap = await getDoc(doc(db, 'users', p.uid));
+  if (!snap.exists()) { banner('bad', 'Unknown attendee. They need to sign up first.'); return; }
+  const user = snap.data();
+  const dateString = todayStr();
+  // One document per user per day: the ID itself blocks duplicates.
+  const ref = doc(db, 'attendance', `${p.uid}_${dateString}`);
+  const result = await runTransaction(db, async tx => {
+    if ((await tx.get(ref)).exists()) return 'dup';
+    tx.set(ref, { userId: p.uid, userName: user.name, dateString, timestamp: serverTimestamp(), scannedBy: me.uid });
+    return 'ok';
+  });
+  if (navigator.vibrate) navigator.vibrate(result === 'ok' ? 60 : [60, 60, 60]);
+  if (result === 'ok') banner('ok', `Checked in: ${user.name}`);
+  else banner('warn', `${user.name} is already checked in today.`);
+}
+
+/* ---------- admin: CSV ---------- */
+$('csvBtn').onclick = () => {
+  if (!todayRows.length) { toast('No check-ins to export yet.', 'warn'); return; }
+  const cell = v => {
+    let s = String(v ?? '');
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // stop spreadsheet formula injection
+    return '"' + s.replace(/"/g, '""') + '"';
+  };
+  const lines = [['Name', 'User ID', 'Date', 'Time', 'Timestamp (ISO)'].map(cell).join(',')];
+  [...todayRows].reverse().forEach(r => {
+    const d = tsOf(r);
+    lines.push([r.userName, r.userId, r.dateString, fmtTime(d), d.toISOString()].map(cell).join(','));
+  });
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `attendance-${listDay}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+</script>
+</body>
+</html>
